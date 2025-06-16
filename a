@@ -1,0 +1,222 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, Wand2 } from "lucide-react";
+import { suggestHashtags, type SuggestHashtagsInput } from "@/ai/flows/suggest-hashtags";
+import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "next/navigation";
+import { posts as mockPostsDb, MOCK_CURRENT_USER_ID } from "@/lib/mock-data";
+
+export default function CreatePostPage() {
+  const [postContent, setPostContent] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [suggestedHashtags, setSuggestedHashtags] = useState<string[]>([]);
+  const [selectedHashtags, setSelectedHashtags] = useState<string[]>([]);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { toast } = useToast();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!MOCK_CURRENT_USER_ID) {
+      router.replace('/login');
+    }
+  }, [router]);
+
+  const handleSuggestHashtags = async () => {
+    if (!postContent.trim()) {
+      toast({
+        title: "Content needed",
+        description: "Please write some content for your post before suggesting hashtags.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsSuggesting(true);
+    setSuggestedHashtags([]);
+    try {
+      const input: SuggestHashtagsInput = { postContent };
+      const result = await suggestHashtags(input);
+      setSuggestedHashtags(result.hashtags);
+    } catch (error) {
+      console.error("Error suggesting hashtags:", error);
+      toast({
+        title: "Error",
+        description: "Could not suggest hashtags. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
+
+  const toggleHashtag = (tag: string) => {
+    setSelectedHashtags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!MOCK_CURRENT_USER_ID) {
+        toast({ title: "Error", description: "You must be logged in to create a post.", variant: "destructive"});
+        router.push('/login');
+        return;
+    }
+    if (!postContent.trim() && !mediaUrl.trim()) {
+      toast({ title: "Cannot create empty post", description: "Please provide content or a media URL.", variant: "destructive"});
+      return;
+    }
+    setIsSubmitting(true);
+    
+    let inferredImageUrl: string | undefined = undefined;
+    let inferredVideoUrl: string | undefined = undefined;
+
+    if (mediaUrl && mediaUrl.trim() !== "") {
+      const url = mediaUrl.trim();
+      const videoExtensions = ['.mp4', '.webm', '.mov', '.ogg', '.avi', '.flv', '.wmv', '.mkv'];
+      const lowerUrl = url.toLowerCase();
+      let isVideo = false;
+
+      for (const ext of videoExtensions) {
+        // Check if URL ends with extension or has extension followed by query/fragment
+        if (lowerUrl.endsWith(ext) || lowerUrl.includes(ext + '?') || lowerUrl.includes(ext + '#')) {
+          isVideo = true;
+          break;
+        }
+      }
+
+      if (isVideo) {
+        inferredVideoUrl = url;
+      } else {
+        // If not identified as a video, assume it's an image if the URL is provided.
+        inferredImageUrl = url;
+      }
+    }
+    
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    const newPost = {
+      id: `post${Date.now()}`,
+      userId: MOCK_CURRENT_USER_ID,
+      content: postContent,
+      imageUrl: inferredImageUrl,
+      videoUrl: inferredVideoUrl,
+      likes: [],
+      createdAt: new Date().toISOString(),
+      hashtags: selectedHashtags,
+    };
+
+    mockPostsDb.unshift(newPost);
+
+    setIsSubmitting(false);
+    toast({ title: "Post Created!", description: "Your post is now live." });
+    router.push("/feed");
+    router.refresh(); // Refresh to show new post on feed
+  };
+
+  if (!MOCK_CURRENT_USER_ID) {
+    return <p>Redirecting to login...</p>;
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-headline">Create New Post</CardTitle>
+        </CardHeader>
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-6">
+            <div className="space-y-2">
+              <Label htmlFor="postContent">What's on your mind?</Label>
+              <Textarea
+                id="postContent"
+                placeholder="Share your thoughts, news, or a cool cat picture idea..."
+                value={postContent}
+                onChange={(e) => setPostContent(e.target.value)}
+                rows={6}
+                className="resize-none"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="mediaUrl">Media URL (Optional, for photo or video)</Label>
+              <Input
+                id="mediaUrl"
+                type="url"
+                placeholder="https://example.com/image.png or /video.mp4"
+                value={mediaUrl}
+                onChange={(e) => setMediaUrl(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <Button type="button" variant="outline" onClick={handleSuggestHashtags} disabled={isSuggesting || !postContent.trim()}>
+                {isSuggesting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="mr-2 h-4 w-4" />
+                )}
+                Suggest Hashtags
+              </Button>
+            </div>
+
+            {suggestedHashtags.length > 0 && (
+              <div className="space-y-2">
+                <Label>Suggested Hashtags (click to select)</Label>
+                <div className="flex flex-wrap gap-2">
+                  {suggestedHashtags.map((tag) => (
+                    <Badge
+                      key={tag}
+                      variant={selectedHashtags.includes(tag) ? "default" : "outline"}
+                      onClick={() => toggleHashtag(tag)}
+                      className="cursor-pointer transition-colors"
+                      role="checkbox"
+                      aria-checked={selectedHashtags.includes(tag)}
+                    >
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+             {selectedHashtags.length > 0 && (
+              <div className="space-y-2">
+                <Label>Selected Hashtags</Label>
+                <div className="flex flex-wrap gap-2">
+                  {selectedHashtags.map((tag) => (
+                    <Badge key={tag} variant="default" className="flex items-center gap-1">
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => toggleHashtag(tag)}
+                        className="ml-1 text-primary-foreground/70 hover:text-primary-foreground"
+                        aria-label={`Remove ${tag}`}
+                       >
+                         &times;
+                       </button>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </CardContent>
+          <CardFooter>
+            <Button type="submit" disabled={isSubmitting || (!postContent.trim() && !mediaUrl.trim())}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create Post
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
+  );
+}
